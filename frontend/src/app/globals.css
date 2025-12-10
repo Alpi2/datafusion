@@ -1,0 +1,128 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter+Display:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Inflectiv Design Tokens */
+    --color-primary: 242 67% 67%; /* #6366F1 - Indigo */
+    --color-secondary: 161 89% 42%; /* #10B981 - Emerald */
+    --color-accent: 38 95% 52%; /* #F59E0B - Amber */
+    --color-danger: 0 84% 60%; /* #EF4444 - Red */
+    --color-surface: 215 33% 15%; /* #0F172A - Dark */
+    --color-background: 221 39% 11%; /* #020617 - Darker */
+
+    /* Semantic colors */
+    --background: var(--color-background);
+    --foreground: 210 40% 98%;
+    --card: var(--color-surface);
+    --card-foreground: 210 40% 98%;
+    --popover: var(--color-surface);
+    --popover-foreground: 210 40% 98%;
+    --primary: var(--color-primary);
+    --primary-foreground: 210 40% 98%;
+    --secondary: var(--color-secondary);
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: var(--color-accent);
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: var(--color-danger);
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: var(--color-primary);
+
+    /* Spatial system */
+    --space-unit: 8px;
+    --radius-subtle: 8px;
+    --radius-medium: 16px;
+    --radius-large: 24px;
+    --radius: var(--radius-subtle);
+
+    /* Chart colors */
+    --chart-1: var(--color-primary);
+    --chart-2: var(--color-secondary);
+    --chart-3: var(--color-accent);
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Typography Scale */
+  .font-display {
+    font-family: "Inter Display", var(--font-sans);
+  }
+
+  .font-body {
+    font-family: "Inter", var(--font-sans);
+  }
+
+  .font-mono {
+    font-family: "JetBrains Mono", var(--font-mono);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted/20;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  .gradient-primary {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--color-primary)) 0%,
+      hsl(var(--color-secondary)) 100%
+    );
+  }
+
+  .gradient-surface {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--color-surface)) 0%,
+      hsl(var(--color-background)) 100%
+    );
+  }
+
+  .text-gradient {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--color-primary)) 0%,
+      hsl(var(--color-secondary)) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
