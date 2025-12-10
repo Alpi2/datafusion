@@ -8,6 +8,47 @@ datasource db {
 }
 
 model User {
+  id                String    @id @default(uuid())
+  walletAddress     String    @unique @map("wallet_address") @db.VarChar(42)
+  username          String    @unique @db.VarChar(50)
+  email             String?   @db.VarChar(255)
+  profileImageUrl   String?   @map("profile_image_url")
+  bio               String?
+  inflBalance       Decimal   @default(0) @map("infl_balance") @db.Decimal(38, 18)
+  reputationScore   Int       @default(0) @map("reputation_score")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  
+  sessions          UserSession[]
+  
+  @@map("users")
+  @@index([walletAddress])
+  @@index([username])
+}
+
+model UserSession {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  sessionToken  String   @unique @map("session_token")
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("user_sessions")
+  @@index([userId])
+  @@index([sessionToken])
+}
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
   id            String   @id @default(uuid())
   email         String?  @unique
   walletAddress String?  @unique
