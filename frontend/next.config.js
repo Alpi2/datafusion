@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    esmExternals: 'loose',
-  },
+  // Note: `experimental.esmExternals` removed — Turbopack does not support this option.
   output: "export",
   distDir: "out",
   trailingSlash: true,
