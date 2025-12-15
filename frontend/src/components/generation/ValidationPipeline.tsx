@@ -19,12 +19,14 @@ interface ValidationPipelineProps {
   validationLevel: string;
   onValidationChange: (level: string) => void;
   tier: GenerationTier;
+  validationResult?: any;
 }
 
 export function ValidationPipeline({
   validationLevel,
   onValidationChange,
   tier,
+  validationResult,
 }: ValidationPipelineProps) {
   const validationLevels = {
     workflow: [
@@ -320,6 +322,86 @@ export function ValidationPipeline({
           </div>
         </div>
       </div>
+      {/* If a validation result is provided, show a concise summary */}
+      {validationResult && (
+        <div className="mt-4 p-4 rounded-lg border border-slate-700/30 bg-slate-900/30">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h4 className="text-sm font-medium text-white">
+                Validation Summary
+              </h4>
+              <div className="text-xs text-slate-400">
+                Score: {validationResult.score ?? "--"} •{" "}
+                {validationResult.isValid ? "Valid" : "Issues found"}
+              </div>
+            </div>
+            <div>
+              <Badge
+                className={`text-xs ${
+                  validationResult.isValid
+                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                    : "bg-rose-500/10 text-rose-300 border-rose-500/30"
+                }`}
+              >
+                {validationResult.isValid ? "Pass" : "Attention"}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <h6 className="text-xs text-slate-400 mb-2">Critical Errors</h6>
+              <ul className="text-xs text-slate-300 list-disc ml-4 max-h-28 overflow-auto">
+                {(validationResult.errors || [])
+                  .slice(0, 5)
+                  .map((e: string, i: number) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                {(validationResult.errors || []).length === 0 && (
+                  <li className="text-xs text-slate-500">None</li>
+                )}
+              </ul>
+            </div>
+
+            <div>
+              <h6 className="text-xs text-slate-400 mb-2">Top Warnings</h6>
+              <ul className="text-xs text-slate-300 list-disc ml-4 max-h-28 overflow-auto">
+                {(validationResult.warnings || [])
+                  .slice(0, 5)
+                  .map((w: string, i: number) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                {(validationResult.warnings || []).length === 0 && (
+                  <li className="text-xs text-slate-500">None</li>
+                )}
+              </ul>
+            </div>
+
+            <div>
+              <h6 className="text-xs text-slate-400 mb-2">Per-column Health</h6>
+              <div className="space-y-2 max-h-28 overflow-auto">
+                {(validationResult.fieldMetrics || [])
+                  .slice(0, 8)
+                  .map((m: any) => (
+                    <div
+                      key={m.fieldName}
+                      className="flex items-center justify-between text-xs text-slate-300"
+                    >
+                      <div>{m.fieldName}</div>
+                      <div className="text-slate-400">
+                        Null {(m.nullRate * 100).toFixed(1)}% • Unique{" "}
+                        {(m.uniquenessRate * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  ))}
+                {!(validationResult.fieldMetrics || []).length && (
+                  <div className="text-xs text-slate-500">No field metrics</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

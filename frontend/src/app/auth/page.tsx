@@ -19,20 +19,74 @@ export default function AuthPage() {
   const [username, setUsername] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
   const [inflBalance, setInflBalance] = useState(1247);
+  // API client
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
-  const handleConnectWallet = () => {
-    // Simulate wallet connection
-    setTimeout(() => {
-      setWalletAddress("0x742d35Cc6e4F3B2f1F5a8e4c1D2A7B8C3D4E5F6A");
-      setIsConnected(true);
-    }, 2000);
+  async function connectWallet() {
+    // 1. MetaMask'tan wallet adresi al
+    if (!(window as any).ethereum) {
+      alert("No Web3 wallet found");
+      return null;
+    }
+    const accounts = await (window as any).ethereum.request({
+      method: "eth_requestAccounts",
+    });
+    const wallet = accounts[0];
+    // 2. Backend'den nonce al via shared auth API
+    const authApi = await import("@/lib/api/auth");
+    const nonceResp = await authApi.requestWalletNonce(wallet);
+    const { message, nonce, user } = (nonceResp as any) || {};
+    // 3. Mesajı imzala
+    const signature = await (window as any).ethereum.request({
+      method: "personal_sign",
+      params: [message, wallet],
+    });
+    // 4. İmzayı doğrula ve token al
+    const verifyResp = await authApi.verifyWalletSignature({
+      walletAddress: wallet,
+      signature,
+      nonce,
+    });
+    const authData = (verifyResp as any) || {};
+    // 5. Token'ı merkezi helper ile kaydet
+    if (authData?.token) {
+      const { setAuthToken } = await import("@/lib/auth");
+      setAuthToken(authData.token);
+    }
+    return authData;
+  }
+
+  async function createProfile(usernameToCreate: string) {
+    const authApi = await import("@/lib/api/auth");
+    return authApi.createProfile(usernameToCreate);
+  }
+
+  const handleConnectWallet = async () => {
+    try {
+      const authData = await connectWallet();
+      if (authData) {
+        setWalletAddress(authData.user.walletAddress);
+        setInflBalance(Number(authData.user.inflBalance || 0));
+        setIsConnected(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "Wallet connect failed");
+    }
   };
 
-  const handleCreateProfile = () => {
-    // Simulate profile creation
-    if (username.trim()) {
-      // Redirect to dashboard after profile creation
-      window.location.href = "/dashboard";
+  const handleCreateProfile = async () => {
+    if (!username.trim()) return;
+    try {
+      const res = await createProfile(username.trim());
+      if (res && res.success) {
+        window.location.href = "/dashboard";
+      } else {
+        alert(res?.error || "Profile creation failed");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || "Profile creation failed");
     }
   };
 

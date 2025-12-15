@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp,
@@ -22,6 +23,274 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+function shortHash(h?: string) {
+  if (!h) return "-";
+  return `${h.slice(0, 6)}...${h.slice(-4)}`;
+}
+
+function PortfolioSummary({ txs, selectedWallet }: any) {
+  const address = selectedWallet?.address?.toLowerCase();
+  const filtered = address
+    ? txs.filter((t: any) =>
+        JSON.stringify(t.raw).toLowerCase().includes(address)
+      )
+    : txs;
+  const totalTx = filtered.length;
+  const uniqueDatasets = new Set(
+    filtered.map((t: any) => t.datasetId).filter(Boolean)
+  ).size;
+  const totalEarnings = filtered.reduce((acc: number, t: any) => {
+    const n = parseFloat(String(t.amount || 0));
+    return acc + (Number.isFinite(n) ? n : 0);
+  }, 0);
+
+  return (
+    <div>
+      <div className="text-xs text-slate-400">Tx Count</div>
+      <div className="text-sm text-white font-medium">{totalTx}</div>
+      <div className="text-xs text-slate-400 mt-2">Unique Datasets</div>
+      <div className="text-sm text-white font-medium">{uniqueDatasets}</div>
+      <div className="text-xs text-slate-400 mt-2">Estimated Value</div>
+      <div className="text-sm text-white font-medium">{totalEarnings}</div>
+    </div>
+  );
+}
+
+function BlockchainDashboard() {
+  const [gas, setGas] = useState<any>(null);
+  const [txs, setTxs] = useState<any[]>([]);
+  const [wallets, setWallets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedWallet, setSelectedWallet] = useState<any | null>(null);
+
+  const fetchGas = async () => {
+    try {
+      const res = await fetch(`/api/blockchain/gas`);
+      const json = await res.json();
+      if (json?.estimates) setGas(json.estimates);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const fetchTxs = async () => {
+    try {
+      const res = await fetch(`/api/blockchain/transactions`, {
+        credentials: "include",
+      });
+      if (res.status === 401) return;
+      const json = await res.json();
+      if (json?.items) setTxs(json.items.slice(0, 50));
+    } catch (e) {}
+  };
+
+  const fetchWallets = async () => {
+    try {
+      const res = await fetch(`/api/blockchain/wallets`, {
+        credentials: "include",
+      });
+      if (res.status === 401) return;
+      const json = await res.json();
+      if (json?.wallets) {
+        const w = json.wallets as any[];
+        // fetch per-wallet $INFL balance
+        const withBalances = await Promise.all(
+          w.map(async (wallet) => {
+            try {
+              const balRes = await fetch(
+                `/api/auth/token/balance/${wallet.address}`
+              );
+              const balJson = await balRes.json();
+              return { ...wallet, inflBalance: balJson?.data?.inflBalance };
+            } catch (e) {
+              return { ...wallet, inflBalance: null };
+            }
+          })
+        );
+        setWallets(withBalances);
+        // select active wallet by default
+        const active = withBalances.find((x) => x.isActive) || withBalances[0];
+        setSelectedWallet(active || null);
+      }
+    } catch (e) {}
+  };
+
+  const activateWallet = async (id: string) => {
+    try {
+      const res = await fetch(`/api/blockchain/wallets/${id}/activate`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (json?.success) fetchWallets();
+    } catch (e) {}
+  };
+
+  const handleSelectWallet = (id: string) => {
+    const w = wallets.find((x: any) => x.id === id);
+    if (w) {
+      setSelectedWallet(w);
+      if (id && id !== "primary") activateWallet(id);
+    }
+  };
+
+  const registerWalletAddress = async (address: string) => {
+    try {
+      const res = await fetch(`/api/blockchain/wallets`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address }),
+      });
+      const json = await res.json();
+      if (json?.success) {
+        fetchWallets();
+        return true;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return false;
+  };
+
+  const connectInjectedWallet = async () => {
+    try {
+      // @ts-ignore
+      if (!window.ethereum) {
+        alert(
+          "No injected wallet found. Try WalletConnect or add address manually."
+        );
+        return;
+      }
+      // @ts-ignore
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      const address = accounts && accounts[0];
+      if (address) {
+        const ok = await registerWalletAddress(address);
+        if (!ok) alert("Failed to register wallet");
+      }
+    } catch (e) {
+      alert("Wallet connect failed");
+    }
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    fetchGas();
+    fetchTxs();
+    fetchWallets();
+    setLoading(false);
+    const iv = setInterval(fetchGas, 15_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const displayedTxs = selectedWallet
+    ? txs.filter((t) =>
+        JSON.stringify(t.raw)
+          .toLowerCase()
+          .includes((selectedWallet.address || "").toLowerCase())
+      )
+    : txs;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="p-4 bg-slate-900/30 rounded-lg">
+        <h4 className="text-sm text-slate-300 mb-2">Gas Estimates (Gwei)</h4>
+        <div className="text-white">
+          <div>Slow: {gas?.slow ?? "-"}</div>
+          <div>Average: {gas?.average ?? "-"}</div>
+          <div>Fast: {gas?.fast ?? "-"}</div>
+          <div className="text-xs text-slate-500 mt-2">
+            Updated:{" "}
+            {gas?.fetchedAt
+              ? new Date(gas.fetchedAt).toLocaleTimeString()
+              : "-"}
+          </div>
+        </div>
+      </div>
+
+      <div className="lg:col-span-2 p-4 bg-slate-900/30 rounded-lg">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-sm text-slate-300">Transaction History</h4>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedWallet?.id ?? ""}
+              onChange={(e) => handleSelectWallet(e.target.value)}
+              className="bg-slate-800/20 text-white px-3 py-2 rounded w-80"
+            >
+              <option value="">Select active wallet</option>
+              {wallets.map((w: any) => (
+                <option key={w.id} value={w.id}>
+                  {`${w.address} ${
+                    w.inflBalance ? `— ${w.inflBalance} INFL` : ""
+                  }`}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => connectInjectedWallet()}
+              className="px-3 py-1 bg-indigo-600 rounded text-sm text-white"
+            >
+              Connect (Injected)
+            </button>
+            <button
+              onClick={() => {
+                const addr = prompt("Paste wallet address to add:");
+                if (addr) registerWalletAddress(addr);
+              }}
+              className="px-3 py-1 bg-slate-800 rounded text-sm text-white"
+            >
+              Add Address
+            </button>
+            <button
+              onClick={fetchTxs}
+              className="px-3 py-1 bg-slate-800 rounded text-sm text-white"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div className="space-y-2 max-h-64 overflow-auto">
+          {txs.length === 0 && (
+            <div className="text-sm text-slate-400">No transactions found.</div>
+          )}
+          {txs.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center justify-between p-2 bg-slate-800/20 rounded"
+            >
+              <div>
+                <div className="text-sm text-white">
+                  {t.type.toUpperCase()} {t.datasetId ? `— ${t.datasetId}` : ""}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {shortHash(t.txHash)} •{" "}
+                  {new Date(t.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-medium text-white">{t.amount ?? "-"}</div>
+                <a
+                  className="text-xs text-slate-400"
+                  href={`${
+                    process.env.NEXT_PUBLIC_BLOCK_EXPLORER_URL ||
+                    "https://polygonscan.com"
+                  }/tx/${t.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  View
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BondingCurveExplainerPage() {
   const steps = [
@@ -430,6 +699,21 @@ export default function BondingCurveExplainerPage() {
                 <div className="absolute left-1/2 transform -translate-x-1/2 w-4 h-4 bg-indigo-500 rounded-full border-2 border-background" />
               </motion.div>
             ))}
+          </div>
+        </motion.div>
+
+        {/* Blockchain Dashboard */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 1.0 }}
+          className="mb-16"
+        >
+          <div className="p-8 bg-slate-800/30 border border-slate-700/50 rounded-2xl">
+            <h2 className="text-2xl font-bold text-white mb-4">
+              Blockchain Dashboard
+            </h2>
+            <BlockchainDashboard />
           </div>
         </motion.div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { uploadDocument, getUserDocuments } from "@/lib/api/embeddings";
 import type { GenerationTier } from "./GenerationInterface";
 
 interface PersonalizedKnowledgePanelProps {
@@ -28,10 +29,11 @@ interface PersonalizedKnowledgePanelProps {
 
 interface UploadedDocument {
   id: string;
-  name: string;
-  type: string;
-  size: number;
+  filename: string;
+  fileType?: string;
+  fileSize: number;
   status: "uploading" | "processing" | "ready" | "error";
+  selected?: boolean;
   extractedInfo?: {
     topics: string[];
     keyTerms: string[];
@@ -66,56 +68,90 @@ export function PersonalizedKnowledgePanel({
 
   const isAvailable = true; // Available for all tiers now
 
-  const handleFileUpload = (files: FileList) => {
-    Array.from(files).forEach((file) => {
+  // Load user documents on mount
+  useEffect(() => {
+    const token = localStorage.getItem("token") || "";
+    (async () => {
+      try {
+        const resp = await getUserDocuments();
+        if (resp && resp.success && Array.isArray(resp.documents)) {
+          const docs = resp.documents.map((d: any) => ({
+            id: d.id,
+            filename: d.filename,
+            fileType: d.fileType,
+            fileSize: Number(d.fileSize || 0),
+            status: d.processed ? "ready" : "processing",
+            selected: false,
+            extractedInfo: d.metadata || undefined,
+          }));
+          // restore selection from localStorage
+          const sel = JSON.parse(
+            localStorage.getItem("knowledgeDocumentIds") || "[]"
+          );
+          if (Array.isArray(sel) && sel.length > 0) {
+            setUploadedDocs(
+              docs.map((p: any) => ({ ...p, selected: sel.includes(p.id) }))
+            );
+          } else {
+            setUploadedDocs(docs as UploadedDocument[]);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const handleFileUpload = async (files: FileList) => {
+    const token = localStorage.getItem("token") || "";
+    Array.from(files).forEach(async (file) => {
+      const tempId = Math.random().toString(36).substr(2, 9);
       const newDoc: UploadedDocument = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: file.name,
-        type: file.type,
-        size: file.size,
+        id: tempId,
+        filename: file.name,
+        fileType: file.type,
+        fileSize: file.size,
         status: "uploading",
+        selected: true,
       };
 
-      setUploadedDocs((prev) => [...prev, newDoc]);
+      setUploadedDocs((prev) => [newDoc, ...prev]);
 
-      // Simulate upload and processing
-      setTimeout(() => {
-        setUploadedDocs((prev) =>
-          prev.map((doc) =>
-            doc.id === newDoc.id ? { ...doc, status: "processing" } : doc
-          )
-        );
-
-        setTimeout(() => {
+      try {
+        const resp = await uploadDocument(file);
+        if (resp && resp.success && resp.document) {
+          const doc = resp.document;
+          const mapped: UploadedDocument = {
+            id: doc.id,
+            filename: doc.filename || file.name,
+            fileType: doc.fileType || file.type,
+            fileSize: Number(doc.fileSize || file.size),
+            status: doc.processed ? "ready" : "processing",
+            selected: true,
+            extractedInfo: doc.metadata || undefined,
+          };
+          setUploadedDocs((prev) => [
+            mapped,
+            ...prev.filter((d) => d.id !== tempId),
+          ]);
+          // persist selection set
+          try {
+            const existing = JSON.parse(
+              localStorage.getItem("knowledgeDocumentIds") || "[]"
+            );
+            const ids = Array.from(new Set([mapped.id, ...(existing || [])]));
+            localStorage.setItem("knowledgeDocumentIds", JSON.stringify(ids));
+          } catch (e) {}
+        } else {
           setUploadedDocs((prev) =>
-            prev.map((doc) =>
-              doc.id === newDoc.id
-                ? {
-                    ...doc,
-                    status: "ready",
-                    extractedInfo: {
-                      topics: [
-                        "Customer Data",
-                        "Financial Records",
-                        "User Behavior",
-                      ],
-                      keyTerms: [
-                        "transaction_id",
-                        "customer_segment",
-                        "revenue",
-                      ],
-                      dataStructures: [
-                        "JSON",
-                        "Relational Tables",
-                        "Time Series",
-                      ],
-                    },
-                  }
-                : doc
-            )
+            prev.map((d) => (d.id === tempId ? { ...d, status: "error" } : d))
           );
-        }, 2000);
-      }, 1000);
+        }
+      } catch (e) {
+        setUploadedDocs((prev) =>
+          prev.map((d) => (d.id === tempId ? { ...d, status: "error" } : d))
+        );
+      }
     });
   };
 
@@ -139,22 +175,50 @@ export function PersonalizedKnowledgePanel({
 
     setChatMessages((prev) => [...prev, userMessage]);
     setNewMessage("");
-
-    // Simulate AI response
-    setTimeout(() => {
-      const aiResponse: ChatMessage = {
-        id: Math.random().toString(36).substr(2, 9),
-        type: "assistant",
-        content:
-          "I understand. Based on your requirements, I'll help generate synthetic data that matches your domain patterns. This context will improve data quality and relevance significantly.",
-        timestamp: new Date(),
-      };
-      setChatMessages((prev) => [...prev, aiResponse]);
-    }, 1500);
+    // Persist chat context for generation job
+    try {
+      const existing = localStorage.getItem("chatContext") || "";
+      const next = [existing, newMessage].filter(Boolean).join("\n");
+      localStorage.setItem("chatContext", next);
+    } catch (e) {
+      // ignore
+    }
   };
 
   const removeDocument = (docId: string) => {
+    // Attempt backend delete but fail gracefully
+    const token = localStorage.getItem("token") || "";
+    fetch(
+      `${
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
+      }/api/embeddings/documents/${docId}`,
+      {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }
+    ).catch(() => {});
     setUploadedDocs((prev) => prev.filter((doc) => doc.id !== docId));
+    // update persisted selection
+    try {
+      const sel = JSON.parse(
+        localStorage.getItem("knowledgeDocumentIds") || "[]"
+      );
+      const next = (sel || []).filter((id: string) => id !== docId);
+      localStorage.setItem("knowledgeDocumentIds", JSON.stringify(next));
+    } catch (e) {}
+  };
+
+  const toggleSelectDocument = (docId: string) => {
+    setUploadedDocs((prev) => {
+      const out = prev.map((d) =>
+        d.id === docId ? { ...d, selected: !d.selected } : d
+      );
+      try {
+        const ids = out.filter((d) => d.selected).map((d) => d.id);
+        localStorage.setItem("knowledgeDocumentIds", JSON.stringify(ids));
+      } catch (e) {}
+      return out;
+    });
   };
 
   if (!isAvailable) {
@@ -277,10 +341,10 @@ export function PersonalizedKnowledgePanel({
                         <FileText className="w-4 h-4 text-blue-400" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-white truncate">
-                            {doc.name}
+                            {doc.filename}
                           </p>
                           <p className="text-xs text-slate-400">
-                            {(doc.size / 1024).toFixed(1)}KB • {doc.status}
+                            {(doc.fileSize / 1024).toFixed(1)}KB • {doc.status}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -299,6 +363,16 @@ export function PersonalizedKnowledgePanel({
                               <Zap className="w-4 h-4 text-yellow-400" />
                             </motion.div>
                           )}
+                          <Button
+                            onClick={() => toggleSelectDocument(doc.id)}
+                            variant={doc.selected ? "default" : "outline"}
+                            size="sm"
+                            className={
+                              doc.selected ? "bg-purple-600" : "text-slate-400"
+                            }
+                          >
+                            {doc.selected ? "Selected" : "Select"}
+                          </Button>
                           <Button
                             onClick={() => removeDocument(doc.id)}
                             variant="ghost"

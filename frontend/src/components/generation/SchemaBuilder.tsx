@@ -1,7 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { generationAPI } from "@/lib/api/generation";
 import {
   Plus,
   Trash2,
@@ -22,6 +37,44 @@ import type { GenerationTier } from "./GenerationInterface";
 
 interface SchemaBuilderProps {
   tier: GenerationTier;
+  onSchemaChange?: (schema: {
+    name?: string;
+    description?: string;
+    fields: SchemaField[];
+  }) => void;
+}
+
+function SortableField({
+  id,
+  children,
+}: {
+  id: string;
+  children: React.ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : undefined,
+  } as any;
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="mb-3"
+    >
+      <div className={isDragging ? "opacity-90" : ""}>{children}</div>
+    </div>
+  );
 }
 
 interface SchemaField {
@@ -40,7 +93,7 @@ interface SchemaField {
   examples?: string[];
 }
 
-export function SchemaBuilder({ tier }: SchemaBuilderProps) {
+export function SchemaBuilder({ tier, onSchemaChange }: SchemaBuilderProps) {
   const [fields, setFields] = useState<SchemaField[]>([
     {
       id: "1",
@@ -66,6 +119,10 @@ export function SchemaBuilder({ tier }: SchemaBuilderProps) {
 
   const [editingField, setEditingField] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [schemaName, setSchemaName] = useState<string>("");
+  const [schemaDescription, setSchemaDescription] = useState<string>("");
+
+  const sensors = useSensors(useSensor(PointerSensor));
 
   const dataTypes = [
     { id: "string", name: "Text", icon: Type, description: "Any text value" },
@@ -119,6 +176,43 @@ export function SchemaBuilder({ tier }: SchemaBuilderProps) {
 
   const updateField = (fieldId: string, updates: Partial<SchemaField>) => {
     setFields(fields.map((f) => (f.id === fieldId ? { ...f, ...updates } : f)));
+  };
+
+  const onDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (active && over && active.id !== over.id) {
+      const oldIndex = fields.findIndex((f) => f.id === active.id);
+      const newIndex = fields.findIndex((f) => f.id === over.id);
+      const newFields = arrayMove(fields, oldIndex, newIndex);
+      setFields(newFields);
+    }
+  };
+
+  // Notify parent of schema changes
+  useEffect(() => {
+    if (onSchemaChange) {
+      onSchemaChange({
+        name: schemaName,
+        description: schemaDescription,
+        fields,
+      });
+    }
+  }, [fields, onSchemaChange]);
+
+  const saveSchema = async () => {
+    try {
+      const payload = {
+        name: schemaName || `Schema ${new Date().toISOString()}`,
+        description: schemaDescription,
+        fields,
+        tier,
+      };
+      const res = await generationAPI.saveSchema(payload);
+      console.log("Schema saved", res);
+      // Optionally show toast or feedback
+    } catch (err) {
+      console.error("Failed to save schema", err);
+    }
   };
 
   const getTypeIcon = (type: string) => {
@@ -196,6 +290,22 @@ export function SchemaBuilder({ tier }: SchemaBuilderProps) {
 
       {/* Schema Fields */}
       <div className="space-y-4 mb-6">
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <input
+            type="text"
+            placeholder="Schema name"
+            value={schemaName}
+            onChange={(e) => setSchemaName(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+          />
+          <input
+            type="text"
+            placeholder="Short description"
+            value={schemaDescription}
+            onChange={(e) => setSchemaDescription(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+          />
+        </div>
         <div className="flex items-center justify-between">
           <h4 className="font-medium text-white">Fields Definition</h4>
           <Button
@@ -209,168 +319,275 @@ export function SchemaBuilder({ tier }: SchemaBuilderProps) {
           </Button>
         </div>
 
-        <AnimatePresence>
-          {fields.map((field, index) => {
-            const TypeIcon = getTypeIcon(field.type);
-            const isEditing = editingField === field.id;
-
-            return (
-              <motion.div
-                key={field.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.3 }}
-                className={`border rounded-lg p-4 ${
-                  isEditing
-                    ? "border-indigo-500 bg-indigo-500/5"
-                    : "border-slate-700"
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    {isEditing ? (
-                      // Edit Mode
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xs font-medium text-slate-400 block mb-1">
-                              Field Name
-                            </label>
-                            <input
-                              type="text"
-                              value={field.name}
-                              onChange={(e) =>
-                                updateField(field.id, { name: e.target.value })
-                              }
-                              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-slate-400 block mb-1">
-                              Data Type
-                            </label>
-                            <select
-                              value={field.type}
-                              onChange={(e) =>
-                                updateField(field.id, { type: e.target.value })
-                              }
-                              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            >
-                              {dataTypes.map((type) => (
-                                <option key={type.id} value={type.id}>
-                                  {type.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-slate-400 block mb-1">
-                            Description
-                          </label>
-                          <input
-                            type="text"
-                            value={field.description}
-                            onChange={(e) =>
-                              updateField(field.id, {
-                                description: e.target.value,
-                              })
-                            }
-                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                          />
-                        </div>
-                        <div className="flex items-center gap-4">
-                          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={field.required}
-                              onChange={(e) =>
-                                updateField(field.id, {
-                                  required: e.target.checked,
-                                })
-                              }
-                              className="w-4 h-4 text-indigo-600 bg-slate-700 border-slate-600 rounded focus:ring-indigo-500"
-                            />
-                            Required field
-                          </label>
-                          <Button
-                            onClick={() => setEditingField(null)}
-                            size="sm"
-                            variant="outline"
-                          >
-                            Done
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      // View Mode
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-slate-700/50 rounded-lg flex items-center justify-center">
-                          <TypeIcon className="w-4 h-4 text-indigo-400" />
-                        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext
+            items={fields.map((f) => f.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <AnimatePresence>
+              {fields.map((field, index) => {
+                const TypeIcon = getTypeIcon(field.type);
+                const isEditing = editingField === field.id;
+                return (
+                  <SortableField key={field.id} id={field.id}>
+                    <motion.div
+                      layout
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      transition={{ duration: 0.3 }}
+                      className={`border rounded-lg p-4 ${
+                        isEditing
+                          ? "border-indigo-500 bg-indigo-500/5"
+                          : "border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h5 className="font-medium text-white">
-                              {field.name}
-                            </h5>
-                            <Badge variant="outline" className="text-xs">
-                              {dataTypes.find((t) => t.id === field.type)?.name}
-                            </Badge>
-                            {field.required && (
-                              <Badge
-                                variant="outline"
-                                className="text-xs text-red-300 border-red-500/30"
-                              >
-                                Required
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-slate-400">
-                            {field.description}
-                          </p>
-                          {field.examples && (
-                            <div className="flex gap-1 mt-1">
-                              {field.examples.slice(0, 2).map((example, i) => (
-                                <Badge
-                                  key={i}
-                                  variant="secondary"
-                                  className="text-xs bg-slate-700/50 text-slate-300"
+                          {isEditing ? (
+                            // Edit Mode
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1">
+                                    Field Name
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={field.name}
+                                    onChange={(e) =>
+                                      updateField(field.id, {
+                                        name: e.target.value,
+                                      })
+                                    }
+                                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1">
+                                    Data Type
+                                  </label>
+                                  <select
+                                    value={field.type}
+                                    onChange={(e) =>
+                                      updateField(field.id, {
+                                        type: e.target.value,
+                                      })
+                                    }
+                                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  >
+                                    {dataTypes.map((type) => (
+                                      <option key={type.id} value={type.id}>
+                                        {type.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-slate-400 block mb-1">
+                                  Description
+                                </label>
+                                <input
+                                  type="text"
+                                  value={field.description}
+                                  onChange={(e) =>
+                                    updateField(field.id, {
+                                      description: e.target.value,
+                                    })
+                                  }
+                                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                              </div>
+                              <div className="grid grid-cols-3 gap-3">
+                                <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1">
+                                    Min (for numeric)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={field.constraints?.min ?? ""}
+                                    onChange={(e) =>
+                                      updateField(field.id, {
+                                        constraints: {
+                                          ...(field.constraints || {}),
+                                          min:
+                                            e.target.value === ""
+                                              ? undefined
+                                              : Number(e.target.value),
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1">
+                                    Max (for numeric)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={field.constraints?.max ?? ""}
+                                    onChange={(e) =>
+                                      updateField(field.id, {
+                                        constraints: {
+                                          ...(field.constraints || {}),
+                                          max:
+                                            e.target.value === ""
+                                              ? undefined
+                                              : Number(e.target.value),
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-slate-400 block mb-1">
+                                    Pattern (regex)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={field.constraints?.pattern ?? ""}
+                                    onChange={(e) =>
+                                      updateField(field.id, {
+                                        constraints: {
+                                          ...(field.constraints || {}),
+                                          pattern: e.target.value || undefined,
+                                        },
+                                      })
+                                    }
+                                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-xs font-medium text-slate-400 block mb-1">
+                                  Enum / Options (comma separated)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={(
+                                    field.constraints?.options || []
+                                  ).join(",")}
+                                  onChange={(e) =>
+                                    updateField(field.id, {
+                                      constraints: {
+                                        ...(field.constraints || {}),
+                                        options: e.target.value
+                                          ? e.target.value
+                                              .split(",")
+                                              .map((s) => s.trim())
+                                          : undefined,
+                                      },
+                                    })
+                                  }
+                                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-white text-sm"
+                                />
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={field.required}
+                                    onChange={(e) =>
+                                      updateField(field.id, {
+                                        required: e.target.checked,
+                                      })
+                                    }
+                                    className="w-4 h-4 text-indigo-600 bg-slate-700 border-slate-600 rounded focus:ring-indigo-500"
+                                  />
+                                  Required field
+                                </label>
+                                <Button
+                                  onClick={() => setEditingField(null)}
+                                  size="sm"
+                                  variant="outline"
                                 >
-                                  {example}
-                                </Badge>
-                              ))}
+                                  Done
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            // View Mode
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-slate-700/50 rounded-lg flex items-center justify-center">
+                                <TypeIcon className="w-4 h-4 text-indigo-400" />
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h5 className="font-medium text-white">
+                                    {field.name}
+                                  </h5>
+                                  <Badge variant="outline" className="text-xs">
+                                    {
+                                      dataTypes.find((t) => t.id === field.type)
+                                        ?.name
+                                    }
+                                  </Badge>
+                                  {field.required && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs text-red-300 border-red-500/30"
+                                    >
+                                      Required
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-sm text-slate-400">
+                                  {field.description}
+                                </p>
+                                {field.examples && (
+                                  <div className="flex gap-1 mt-1">
+                                    {field.examples
+                                      .slice(0, 2)
+                                      .map((example, i) => (
+                                        <Badge
+                                          key={i}
+                                          variant="secondary"
+                                          className="text-xs bg-slate-700/50 text-slate-300"
+                                        >
+                                          {example}
+                                        </Badge>
+                                      ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
-                      </div>
-                    )}
-                  </div>
 
-                  {!isEditing && (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingField(field.id)}
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeField(field.id)}
-                        className="text-red-400 hover:text-red-300"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
+                        {!isEditing && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditingField(field.id)}
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeField(field.id)}
+                              className="text-red-400 hover:text-red-300"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  </SortableField>
+                );
+              })}
+            </AnimatePresence>
+          </SortableContext>
+        </DndContext>
 
         {!canAddField() && (
           <div className="text-center py-4 border border-slate-700 rounded-lg bg-slate-800/20">
@@ -456,7 +673,12 @@ export function SchemaBuilder({ tier }: SchemaBuilderProps) {
             <Download className="w-4 h-4 mr-2" />
             Export Schema
           </Button>
-          <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700">
+          <Button
+            onClick={saveSchema}
+            disabled={!fields.length}
+            size="sm"
+            className="bg-indigo-600 hover:bg-indigo-700"
+          >
             Save Schema
           </Button>
         </div>

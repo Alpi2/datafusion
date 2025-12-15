@@ -15,6 +15,7 @@ interface AdvancedConfigPanelProps {
   onModelsChange: (models: string[]) => void;
   validationLevel: string;
   onValidationChange: (level: string) => void;
+  validationResult?: any;
   complianceRequirements: string[];
   onComplianceChange: (requirements: string[]) => void;
   tierConfig: {
@@ -28,6 +29,11 @@ interface AdvancedConfigPanelProps {
     validation: boolean;
     compliance: boolean;
   };
+  onSchemaChange?: (schema: {
+    name?: string;
+    description?: string;
+    fields: any[];
+  }) => void;
 }
 
 export function AdvancedConfigPanel({
@@ -36,9 +42,11 @@ export function AdvancedConfigPanel({
   onModelsChange,
   validationLevel,
   onValidationChange,
+  validationResult,
   complianceRequirements,
   onComplianceChange,
   tierConfig,
+  onSchemaChange,
 }: AdvancedConfigPanelProps) {
   const [personalizedKnowledgeEnabled, setPersonalizedKnowledgeEnabled] =
     useState(false);
@@ -71,7 +79,7 @@ export function AdvancedConfigPanel({
           />
 
           {/* Schema Builder */}
-          <SchemaBuilder tier={tier} />
+          <SchemaBuilder tier={tier} onSchemaChange={onSchemaChange} />
         </div>
 
         {/* Validation & Compliance */}
@@ -81,6 +89,7 @@ export function AdvancedConfigPanel({
               tier={tier}
               validationLevel={validationLevel}
               onValidationChange={onValidationChange}
+              validationResult={validationResult}
             />
           )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { UserType, GenerationTier } from "./GenerationInterface";
+import { generationAPI } from "@/lib/api/generation";
 
 interface PromptBarProps {
   userType: UserType;
@@ -33,10 +34,13 @@ interface PromptBarProps {
     compliance: boolean;
   };
   onGenerationStart: (prompt: string, config: Record<string, unknown>) => void;
+  schema?: any;
   onAdvancedToggle: () => void;
   showAdvanced: boolean;
   isGenerating: boolean;
   compact?: boolean;
+  previewRows?: number;
+  onEstimate?: (est: any) => void;
 }
 
 export default function PromptBar({
@@ -44,10 +48,13 @@ export default function PromptBar({
   selectedTier,
   tierConfig,
   onGenerationStart,
+  schema,
   onAdvancedToggle,
   showAdvanced,
   isGenerating,
   compact = false,
+  previewRows,
+  onEstimate,
 }: PromptBarProps) {
   const [prompt, setPrompt] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
@@ -129,12 +136,44 @@ export default function PromptBar({
     },
   ];
 
-  const availableTemplates = templates.filter((t) => {
-    if (selectedTier === "basic") return t.tier === "basic";
-    if (selectedTier === "workflow")
-      return ["basic", "workflow"].includes(t.tier);
-    return true;
-  });
+  const [savedTemplates, setSavedTemplates] = useState<any[]>([]);
+  const [savedSchemas, setSavedSchemas] = useState<any[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const tResRaw: any = await generationAPI.getTemplates();
+        const sResRaw: any = await generationAPI.getSchemas();
+        if (!mounted) return;
+        const templatesArr = Array.isArray(tResRaw)
+          ? tResRaw
+          : tResRaw?.data?.templates ||
+            tResRaw?.templates ||
+            tResRaw?.data ||
+            [];
+        const schemasArr = Array.isArray(sResRaw)
+          ? sResRaw
+          : sResRaw?.data?.schemas || sResRaw?.schemas || sResRaw?.data || [];
+        setSavedTemplates(templatesArr);
+        setSavedSchemas(schemasArr);
+      } catch (err) {
+        // ignore for now
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedTier]);
+
+  const availableTemplates = [...templates, ...(savedTemplates || [])].filter(
+    (t) => {
+      if (selectedTier === "basic") return t.tier === "basic";
+      if (selectedTier === "workflow")
+        return ["basic", "workflow"].includes(t.tier);
+      return true;
+    }
+  );
 
   const handleGenerate = () => {
     if (!prompt.trim() && !selectedTemplate) return;
@@ -143,12 +182,24 @@ export default function PromptBar({
       ? templates.find((t) => t.id === selectedTemplate)?.prompt || prompt
       : prompt;
 
-    const config = {
+    const config: Record<string, unknown> = {
       tier: selectedTier,
       template: selectedTemplate,
       userType,
       timestamp: Date.now(),
     };
+
+    if (schema) config.schema = schema;
+
+    // Optionally request an estimate before starting (parent may call generationAPI.preview)
+    if (onEstimate) {
+      onEstimate({
+        prompt: finalPrompt,
+        tier: selectedTier,
+        schema,
+        rowCount: previewRows ?? 5,
+      });
+    }
 
     onGenerationStart(finalPrompt, config);
   };
@@ -259,65 +310,105 @@ export default function PromptBar({
         </div>
       </motion.div>
 
-      {/* Quick Templates */}
+      {/* Template Library */}
       <AnimatePresence>
-        {availableTemplates.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
-            className="mb-4"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <FileText className="w-4 h-4 text-indigo-400" />
-              <span className="text-sm font-medium text-white">
-                Quick Start Templates
-              </span>
-              <Badge variant="outline" className="text-xs text-slate-400">
-                {availableTemplates.length} available
-              </Badge>
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.3 }}
+          className="mb-4"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <FileText className="w-4 h-4 text-indigo-400" />
+            <span className="text-sm font-medium text-white">
+              Template Library
+            </span>
+            <Badge variant="outline" className="text-xs text-slate-400">
+              {availableTemplates.length + savedSchemas.length} available
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+            {availableTemplates.map((template) => (
+              <motion.div
+                key={`tpl-${template.id}`}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.2 }}
+                className={`p-3 border rounded-lg cursor-pointer transition-all ${
+                  selectedTemplate === template.id
+                    ? "border-indigo-500 bg-indigo-500/10"
+                    : "border-slate-700 hover:border-slate-600"
+                }`}
+                onClick={() => {
+                  setSelectedTemplate(
+                    selectedTemplate === template.id ? null : template.id
+                  );
+                  if (selectedTemplate !== template.id)
+                    setPrompt(template.prompt || "+");
+                }}
+              >
+                <h4 className="font-medium text-white text-sm mb-1">
+                  {template.name}
+                </h4>
+                <p className="text-xs text-slate-400 mb-2">
+                  {template.description}
+                </p>
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="text-xs">
+                    {template.fields?.length ?? 0} fields
+                  </Badge>
+                  <Badge variant="outline" className="text-xs text-slate-400">
+                    {template.tier}
+                  </Badge>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          {savedSchemas.length > 0 && (
+            <div>
+              <h5 className="text-sm text-slate-300 mb-2">
+                Your Saved Schemas
+              </h5>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                {savedSchemas.map((s: any) => (
+                  <motion.div
+                    key={`schema-${s.id}`}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.18 }}
+                    className={`p-3 border rounded-lg cursor-pointer transition-all border-slate-700 hover:border-slate-600`}
+                    onClick={() => {
+                      setSelectedTemplate(s.id);
+                      // apply schema prompt if present
+                      if (s.prompt) setPrompt(s.prompt);
+                    }}
+                  >
+                    <h4 className="font-medium text-white text-sm mb-1">
+                      {s.name}
+                    </h4>
+                    <p className="text-xs text-slate-400 mb-2">
+                      {s.description}
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <Badge variant="outline" className="text-xs">
+                        {(s.fields || []).length} fields
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="text-xs text-slate-400"
+                      >
+                        {s.tier}
+                      </Badge>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {availableTemplates.map((template) => (
-                <motion.div
-                  key={template.id}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.2 }}
-                  className={`p-3 border rounded-lg cursor-pointer transition-all ${
-                    selectedTemplate === template.id
-                      ? "border-indigo-500 bg-indigo-500/10"
-                      : "border-slate-700 hover:border-slate-600"
-                  }`}
-                  onClick={() => {
-                    setSelectedTemplate(
-                      selectedTemplate === template.id ? null : template.id
-                    );
-                    if (selectedTemplate !== template.id) {
-                      setPrompt(template.prompt);
-                    }
-                  }}
-                >
-                  <h4 className="font-medium text-white text-sm mb-1">
-                    {template.name}
-                  </h4>
-                  <p className="text-xs text-slate-400 mb-2">
-                    {template.description}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <Badge variant="outline" className="text-xs">
-                      {template.fields.length} fields
-                    </Badge>
-                    <Badge variant="outline" className="text-xs text-slate-400">
-                      {template.tier}
-                    </Badge>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
+          )}
+        </motion.div>
       </AnimatePresence>
 
       {/* Main Prompt Input */}

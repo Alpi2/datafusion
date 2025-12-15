@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Search,
   Filter,
@@ -16,83 +16,25 @@ import { Badge } from "@/components/ui/badge";
 import { DatasetCard } from "./DatasetCard";
 import { MarketplaceFilters } from "./MarketplaceFilters";
 import { CategoryNav } from "./CategoryNav";
+import marketplaceAPI from "@/lib/api/marketplace";
 
-const mockDatasets = [
+const USE_DEMO = process.env.NEXT_PUBLIC_USE_DEMO_MARKETPLACE === "true";
+
+// Small demo dataset used only when backend is unreachable and USE_DEMO flag is enabled
+const demoDatasets = [
   {
-    id: 1,
-    title: "E-commerce Customer Behavior Analytics",
-    description:
-      "Comprehensive dataset containing purchase patterns, browsing behavior, and customer segments for online retail optimization.",
-    creator: "DataVault Labs",
+    id: "demo-1",
+    title: "Demo: E-commerce Customer Behavior",
+    description: "Sample dataset to preview marketplace UI",
+    creator: "Demo Vendor",
     category: "Business Intelligence",
-    price: 299,
-    downloads: 2840,
-    rating: 4.8,
-    quality: 96,
-    lastUpdated: "2 days ago",
-    tags: ["customer-analytics", "e-commerce", "behavioral-data"],
-    preview: {
-      rows: 125000,
-      columns: 18,
-      size: "45MB",
-    },
-  },
-  {
-    id: 2,
-    title: "Financial Market Sentiment Analysis",
-    description:
-      "Real-time social media sentiment data correlated with stock price movements across major exchanges.",
-    creator: "QuantFlow Research",
-    category: "Finance",
-    price: 599,
-    downloads: 1560,
-    rating: 4.9,
-    quality: 98,
-    lastUpdated: "1 hour ago",
-    tags: ["sentiment-analysis", "finance", "social-media"],
-    preview: {
-      rows: 890000,
-      columns: 24,
-      size: "156MB",
-    },
-  },
-  {
-    id: 3,
-    title: "Healthcare Patient Outcomes Dataset",
-    description:
-      "Anonymized patient data showing treatment efficacy across different demographics and conditions.",
-    creator: "MedData Insights",
-    category: "Healthcare",
-    price: 899,
-    downloads: 920,
-    rating: 4.7,
-    quality: 99,
-    lastUpdated: "5 days ago",
-    tags: ["healthcare", "patient-outcomes", "clinical-data"],
-    preview: {
-      rows: 67000,
-      columns: 32,
-      size: "78MB",
-    },
-  },
-  {
-    id: 4,
-    title: "Social Media Engagement Patterns",
-    description:
-      "Cross-platform engagement metrics and viral content analysis for marketing optimization.",
-    creator: "ViralMetrics Co",
-    category: "Marketing",
-    price: 199,
-    downloads: 3400,
-    rating: 4.6,
-    quality: 94,
-    lastUpdated: "1 day ago",
-    tags: ["social-media", "engagement", "viral-content"],
-    preview: {
-      rows: 340000,
-      columns: 15,
-      size: "89MB",
-    },
+    price: 0,
+    downloads: 123,
+    rating: 4.5,
+    quality: 90,
+    lastUpdated: "Just now",
+    tags: ["demo"],
+    preview: { rows: 10, columns: 5, size: "1KB" },
   },
 ];
 
@@ -130,31 +72,71 @@ export function MarketplaceInterface() {
     downloads: 0,
   });
 
-  const filteredDatasets = mockDatasets.filter((dataset) => {
-    const matchesSearch =
-      dataset.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      dataset.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      dataset.tags.some((tag) =>
-        tag.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+  // Live data state
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [categoriesState, setCategoriesState] = useState<string[]>(categories);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(12);
+  const [total, setTotal] = useState(0);
 
-    const matchesCategory =
-      selectedCategory === "All Categories" ||
-      dataset.category === selectedCategory;
-    const matchesPrice =
-      dataset.price >= filters.priceRange[0] &&
-      dataset.price <= filters.priceRange[1];
-    const matchesQuality = dataset.quality >= filters.quality;
-    const matchesDownloads = dataset.downloads >= filters.downloads;
+  // datasets come from backend already filtered by query params.
+  const filteredDatasets = datasets && datasets.length ? datasets : error && USE_DEMO ? demoDatasets : datasets;
 
-    return (
-      matchesSearch &&
-      matchesCategory &&
-      matchesPrice &&
-      matchesQuality &&
-      matchesDownloads
-    );
-  });
+  useEffect(() => {
+    let mounted = true;
+
+    async function fetchData() {
+      setLoading(true);
+      setError(null);
+      try {
+        const category =
+          selectedCategory === "All Categories" ? undefined : selectedCategory;
+
+        const resp = await marketplaceAPI.listDatasets({
+          page,
+          limit,
+          category,
+          search: searchQuery,
+          sortBy,
+          priceMin: filters.priceRange[0],
+          priceMax: filters.priceRange[1],
+          qualityMin: filters.quality,
+          downloadsMin: filters.downloads,
+        });
+
+        if (!mounted) return;
+
+        // Support different API shapes: { items, total } or { datasets, total }
+        const items = resp?.items || resp?.datasets || [];
+        setDatasets(items);
+        setTotal(resp?.total || resp?.count || items.length);
+
+        // Try fetch categories if available
+        try {
+          const cats = await marketplaceAPI.getCategories();
+          if (mounted && Array.isArray(cats)) {
+            setCategoriesState(["All Categories", ...cats]);
+          }
+        } catch (e) {
+          // ignore category errors
+        }
+      } catch (err: any) {
+        console.error("Marketplace fetch error", err);
+        setError(err?.message || "Failed to load datasets");
+        if (USE_DEMO) setDatasets(demoDatasets);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    fetchData();
+
+    return () => {
+      mounted = false;
+    };
+  }, [searchQuery, selectedCategory, sortBy, filters, page, limit]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -172,7 +154,7 @@ export function MarketplaceInterface() {
 
         {/* Category Navigation */}
         <CategoryNav
-          categories={categories}
+          categories={categoriesState}
           selectedCategory={selectedCategory}
           onCategorySelect={setSelectedCategory}
         />
@@ -252,49 +234,52 @@ export function MarketplaceInterface() {
           {/* Results */}
           <div className="flex-1">
             <div className="flex items-center justify-between mb-6">
-              <p className="text-slate-300">
-                {filteredDatasets.length} datasets found
-              </p>
+              <p className="text-slate-300">{(filteredDatasets || []).length} datasets found</p>
               <div className="text-slate-400 text-sm">
-                Showing results for{" "}
-                {selectedCategory !== "All Categories" && selectedCategory}
+                Showing results for {selectedCategory !== "All Categories" && selectedCategory}
               </div>
             </div>
 
-            {filteredDatasets.length === 0 ? (
+            {loading ? (
               <div className="text-center py-16">
-                <div className="text-slate-400 mb-4">
-                  No datasets found matching your criteria
-                </div>
+                <div className="loader mb-4">Loading datasets...</div>
+                <p className="text-slate-400">Please wait while we fetch marketplace data.</p>
+              </div>
+            ) : error ? (
+              <div className="text-center py-16">
+                <div className="text-red-400 mb-4">{error}</div>
+                {USE_DEMO ? (
+                  <div className="text-slate-400 mb-4">Showing demo datasets instead.</div>
+                ) : null}
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setPage(1);
+                    setSearchQuery("");
+                    setSelectedCategory("All Categories");
+                  }}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (filteredDatasets || []).length === 0 ? (
+              <div className="text-center py-16">
+                <div className="text-slate-400 mb-4">No datasets found matching your criteria</div>
                 <Button
                   variant="outline"
                   onClick={() => {
                     setSearchQuery("");
                     setSelectedCategory("All Categories");
-                    setFilters({
-                      priceRange: [0, 1000] as [number, number],
-                      quality: 80,
-                      downloads: 0,
-                    });
+                    setFilters({ priceRange: [0, 1000] as [number, number], quality: 80, downloads: 0 });
                   }}
                 >
                   Clear filters
                 </Button>
               </div>
             ) : (
-              <div
-                className={
-                  viewMode === "grid"
-                    ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"
-                    : "space-y-4"
-                }
-              >
-                {filteredDatasets.map((dataset) => (
-                  <DatasetCard
-                    key={dataset.id}
-                    dataset={dataset}
-                    viewMode={viewMode}
-                  />
+              <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6" : "space-y-4"}>
+                {(filteredDatasets || []).map((dataset) => (
+                  <DatasetCard key={dataset.id} dataset={dataset} viewMode={viewMode} />
                 ))}
               </div>
             )}

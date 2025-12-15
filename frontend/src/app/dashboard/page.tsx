@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   BarChart3,
@@ -48,32 +48,52 @@ interface Dataset {
 }
 
 export default function DashboardPage() {
+  /*
+    TODO (UX roadmap):
+    - Dashboard should subscribe to real-time earnings via socket; add `useEarningsSocket(userId)` hook.
+    - Provide a prop or context hook for `onboardingMode` so onboarding can highlight dashboard widgets.
+    - Expose `refreshDataset(id)` function to allow other components (onboarding/sample walkthrough) to trigger dataset refresh.
+  */
+
   const [activeTab, setActiveTab] = useState<
     "overview" | "create" | "datasets" | "earnings" | "analytics"
   >("overview");
 
-  // Mock user data
-  const userData = {
-    totalEarnings: 14547,
-    monthlyEarnings: 3420,
-    weeklyEarnings: 856,
-    publishedDatasets: 7,
-    rankingPosition: 124,
-  };
+  // Real data state
+  const [userStats, setUserStats] = useState<any | null>(null);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [activityFeed, setActivityFeed] = useState<any[]>([]);
+  const [earningsSummary, setEarningsSummary] = useState<any | null>(null);
 
-  // Mock published datasets
-  const publishedDatasets: Dataset[] = [
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [loadingDatasets, setLoadingDatasets] = useState(false);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [loadingEarnings, setLoadingEarnings] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Per-area errors to provide precise user-visible messages
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [datasetsError, setDatasetsError] = useState<string | null>(null);
+  const [earningsError, setEarningsError] = useState<string | null>(null);
+
+  const userId =
+    typeof window !== "undefined" ? localStorage.getItem("user_id") || "" : "";
+
+  const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+  // Sample fallback datasets to display when in demo mode and backend is unreachable
+  const sampleDatasets: Dataset[] = [
     {
-      id: "1",
+      id: "sample-1",
       name: "E-commerce Customer Analytics",
       description:
         "Comprehensive customer behavior and purchase data for retail analytics",
       tier: "production",
       status: "graduated",
       category: "Retail",
-      marketCap: 92000,
+      marketCap: 186000,
+      fdv: undefined,
       earnings: 5856,
-      createdAt: "2 days ago",
+      createdAt: new Date().toISOString(),
       volume24h: 15420,
       downloads: 342,
       holders: 156,
@@ -83,16 +103,16 @@ export default function DashboardPage() {
       deploymentType: "public",
     },
     {
-      id: "2",
+      id: "sample-2",
       name: "Financial Transaction Dataset",
-      description:
-        "Synthetic banking and transaction data for fintech applications",
+      description: "Synthetic banking and transaction data for fintech applications",
       tier: "workflow",
       status: "bonding",
       category: "Finance",
       marketCap: 45300,
+      fdv: undefined,
       earnings: 3127,
-      createdAt: "1 week ago",
+      createdAt: new Date().toISOString(),
       volume24h: 8920,
       downloads: 189,
       holders: 89,
@@ -102,15 +122,16 @@ export default function DashboardPage() {
       deploymentType: "public",
     },
     {
-      id: "3",
+      id: "sample-3",
       name: "Healthcare Records Dataset",
       description: "Anonymized patient data for medical research and analysis",
       tier: "production",
       status: "bonding",
       category: "Healthcare",
       marketCap: 28700,
+      fdv: undefined,
       earnings: 2340,
-      createdAt: "3 days ago",
+      createdAt: new Date().toISOString(),
       volume24h: 5640,
       downloads: 124,
       holders: 67,
@@ -120,44 +141,177 @@ export default function DashboardPage() {
       deploymentType: "public",
     },
     {
-      id: "4",
+      id: "sample-4",
       name: "Enterprise Customer Database",
       description: "Private enterprise customer analytics for internal use",
       tier: "production",
       status: "private",
       category: "Enterprise",
       marketCap: 0,
+      fdv: undefined,
       earnings: 2890,
-      createdAt: "5 days ago",
+      createdAt: new Date().toISOString(),
       volume24h: 0,
       downloads: 0,
       holders: 1,
       qualityScore: 98,
       bondingProgress: 0,
-      graduationThreshold: 0,
+      graduationThreshold: 69000,
       deploymentType: "private",
       nftTokenId: "INAI-NFT-#1847",
       storageProvider: "arweave",
-      licenseRevenue: 2890,
     },
     {
-      id: "5",
+      id: "sample-5",
       name: "Social Media Analytics",
       description: "User engagement and content performance metrics",
       tier: "workflow",
       status: "draft",
       category: "Marketing",
       marketCap: 0,
+      fdv: undefined,
       earnings: 0,
-      createdAt: "1 hour ago",
+      createdAt: new Date().toISOString(),
       volume24h: 0,
       downloads: 0,
       holders: 0,
       qualityScore: 0,
       bondingProgress: 0,
       graduationThreshold: 69000,
+      deploymentType: "public",
     },
   ];
+
+  // Decide which datasets to display: prefer backend results; fall back to demo only when demo mode is enabled
+  const displayedDatasets = datasets.length ? datasets : (isDemoMode ? sampleDatasets : []);
+
+  const fetchUserStats = useCallback(async () => {
+    if (!userId) return;
+    setLoadingStats(true);
+    setError(null);
+    setStatsError(null);
+    try {
+      const { getUserStats } = await import("@/lib/api/dashboardClient");
+      const data = await getUserStats(userId);
+      setUserStats(data);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setStatsError(msg);
+      setError(msg);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, [userId]);
+
+  const fetchUserDatasets = useCallback(async () => {
+    if (!userId) return;
+    setLoadingDatasets(true);
+    setError(null);
+    setDatasetsError(null);
+    try {
+      const { getUserDatasets } = await import("@/lib/api/dashboardClient");
+      const data = await getUserDatasets(userId);
+      setDatasets(data || []);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setDatasetsError(msg);
+      setError(msg);
+      // In demo mode, provide a sample dataset list so the UI remains useful
+      if (isDemoMode) {
+        setDatasets(sampleDatasets);
+      }
+    } finally {
+      setLoadingDatasets(false);
+    }
+  }, [userId]);
+
+  const fetchActivityFeed = useCallback(async () => {
+    if (!userId) return;
+    setLoadingActivity(true);
+    setError(null);
+    try {
+      const { getActivityFeed } = await import("@/lib/api/dashboardClient");
+      const data = await getActivityFeed(userId, 20);
+      setActivityFeed(data);
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setLoadingActivity(false);
+    }
+  }, [userId]);
+
+  const fetchEarningsSummary = useCallback(async () => {
+    if (!userId) return;
+    setLoadingEarnings(true);
+    setError(null);
+    setEarningsError(null);
+    try {
+      const { getEarningsSummary } = await import("@/lib/api/dashboardClient");
+      const data = await getEarningsSummary(userId);
+      setEarningsSummary(data);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setEarningsError(msg);
+      setError(msg);
+    } finally {
+      setLoadingEarnings(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await Promise.all([fetchUserStats(), fetchUserDatasets(), fetchActivityFeed()]);
+      } catch (e) {
+        // errors are handled in individual fetch functions and surfaced via state
+      }
+    })();
+  }, [fetchUserStats, fetchUserDatasets, fetchActivityFeed]);
+  
+
+  // Subscribe to earnings socket updates to refresh earnings and activity in real-time
+  // Use a dynamic require/import to avoid SSR issues in Next.js app router
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const useEarningsSocket = require("@/hooks/useEarningsSocket").default;
+    // call the hook which will manage the socket lifecycle and invoke callbacks
+    useEarningsSocket(userId || null, {
+      onEarningsUpdate: (_payload: any) => {
+        // Refresh earnings summary and recent activity when an update arrives
+        try {
+          fetchEarningsSummary();
+          fetchActivityFeed();
+        } catch (e) {
+          // ignore
+        }
+      },
+    });
+  } catch (e) {
+    // If the hook cannot be loaded (server-side) we silently ignore; page will still fetch on tab change
+  }
+
+  useEffect(() => {
+    (async () => {
+      if (activeTab === "earnings") {
+        try {
+          await fetchEarningsSummary();
+        } catch (e) {
+          // error set in fetchEarningsSummary
+        }
+      }
+      if (activeTab === "analytics") {
+        // lazy-load analytics when tab opens
+        const { getPerformanceMetrics } = await import(
+          "@/lib/api/dashboardClient"
+        );
+        try {
+          await getPerformanceMetrics(userId);
+        } catch (e) {
+          // ignore for now
+        }
+      }
+    })();
+  }, [activeTab, fetchEarningsSummary, userId]);
 
   const handleStartCreation = () => {
     window.location.href = "/";
@@ -262,50 +416,46 @@ export default function DashboardPage() {
                     </select>
                   </div>
                   <div className="h-64 flex items-center justify-center">
-                    {/* Mock Chart */}
-                    <div className="relative w-full h-full">
-                      <svg className="w-full h-full" viewBox="0 0 400 200">
-                        <defs>
-                          <linearGradient
-                            id="earningsGradient"
-                            x1="0%"
-                            y1="0%"
-                            x2="0%"
-                            y2="100%"
-                          >
-                            <stop
-                              offset="0%"
-                              stopColor="#6366f1"
-                              stopOpacity="0.3"
-                            />
-                            <stop
-                              offset="100%"
-                              stopColor="#6366f1"
-                              stopOpacity="0"
-                            />
-                          </linearGradient>
-                        </defs>
-                        <path
-                          d="M 0,180 L 50,160 L 100,140 L 150,150 L 200,120 L 250,100 L 300,80 L 350,60 L 400,40 L 400,200 L 0,200 Z"
-                          fill="url(#earningsGradient)"
-                        />
-                        <path
-                          d="M 0,180 L 50,160 L 100,140 L 150,150 L 200,120 L 250,100 L 300,80 L 350,60 L 400,40"
-                          fill="none"
-                          stroke="#6366f1"
-                          strokeWidth="2"
-                        />
-                      </svg>
-                      <div className="absolute bottom-0 left-0 right-0 flex justify-between text-xs text-slate-500">
-                        <span>Mon</span>
-                        <span>Tue</span>
-                        <span>Wed</span>
-                        <span>Thu</span>
-                        <span>Fri</span>
-                        <span>Sat</span>
-                        <span>Sun</span>
+                    {loadingStats ? (
+                      <div className="text-slate-400">
+                        İstatistikler yükleniyor...
                       </div>
-                    </div>
+                    ) : userStats ? (
+                      <div className="w-full grid grid-cols-2 gap-4">
+                        <div className="p-4 bg-slate-800/20 rounded">
+                          <div className="text-sm text-slate-400">
+                            Toplam Kazanç
+                          </div>
+                          <div className="text-2xl font-bold text-white">
+                            {userStats.totalEarnings ?? 0}
+                          </div>
+                        </div>
+                        <div className="p-4 bg-slate-800/20 rounded">
+                          <div className="text-sm text-slate-400">Aylık</div>
+                          <div className="text-2xl font-bold text-white">
+                            {userStats.monthlyEarnings ?? 0}
+                          </div>
+                        </div>
+                        <div className="p-4 bg-slate-800/20 rounded">
+                          <div className="text-sm text-slate-400">
+                            Yayınlanan Datasets
+                          </div>
+                          <div className="text-2xl font-bold text-white">
+                            {userStats.publishedDatasets ?? 0}
+                          </div>
+                        </div>
+                        <div className="p-4 bg-slate-800/20 rounded">
+                          <div className="text-sm text-slate-400">Sıralama</div>
+                          <div className="text-2xl font-bold text-white">
+                            {userStats.rankingPosition ?? "-"}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-slate-400">
+                        İstatistik bulunamadı
+                      </div>
+                    )}
                   </div>
                   <div className="mt-4 flex items-center justify-between">
                     <div>
@@ -584,7 +734,7 @@ export default function DashboardPage() {
                   </h4>
                   <div className="text-center">
                     <div className="text-3xl font-bold text-indigo-400 mb-1">
-                      #{userData.rankingPosition}
+                      #{loadingStats ? "…" : userStats?.rankingPosition ?? "-"}
                     </div>
                     <div className="text-sm text-slate-400 mb-3">
                       Creator Leaderboard
@@ -751,14 +901,60 @@ export default function DashboardPage() {
           {activeTab === "datasets" && (
             <div className="space-y-6">
               {/* Dataset Cards */}
-              {publishedDatasets.map((dataset) => (
-                <motion.div
-                  key={dataset.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className="p-6 bg-slate-800/30 border border-slate-700/50 rounded-xl hover:border-slate-600/50 transition-all"
-                >
+              {loadingDatasets ? (
+                <div className="text-center py-16">
+                  <div className="loader mb-4">Loading datasets...</div>
+                  <p className="text-slate-400">Please wait while we fetch your datasets.</p>
+                </div>
+              ) : datasetsError ? (
+                <div className="text-center py-16">
+                  <div className="text-red-400 mb-4">{datasetsError}</div>
+                  {isDemoMode ? (
+                    <div className="text-slate-400 mb-4">Showing demo datasets because demo mode is enabled.</div>
+                  ) : (
+                    <div className="text-slate-400 mb-4">No datasets could be loaded. If this persists, contact support.</div>
+                  )}
+                  <div className="flex items-center justify-center gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setDatasetsError(null);
+                        setError(null);
+                        setPage(1);
+                        fetchUserDatasets();
+                      }}
+                    >
+                      Retry
+                    </Button>
+                    {!isDemoMode && (
+                      <Button onClick={handleStartCreation} className="bg-indigo-600 hover:bg-indigo-700">
+                        Create First Dataset
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                displayedDatasets.length === 0 ? (
+                  <div className="text-center py-16">
+                    <div className="text-slate-400 mb-4">You don't have any datasets yet.</div>
+                    <div className="text-slate-400 mb-4">Start by creating a dataset to see it here.</div>
+                    <Button onClick={handleStartCreation} className="bg-indigo-600 hover:bg-indigo-700">
+                      Create First Dataset
+                    </Button>
+                  </div>
+                ) : (
+                  displayedDatasets.map((dataset) => (
+                    <motion.div
+                      key={dataset.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="p-6 bg-slate-800/30 border border-slate-700/50 rounded-xl hover:border-slate-600/50 transition-all"
+                    >
+                
+                  ))
+                )
+              )}
                   <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                     {/* Dataset Info */}
                     <div className="lg:col-span-2">
@@ -1051,7 +1247,13 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="p-6 bg-slate-800/30 border border-slate-700/50 rounded-xl">
                   <div className="text-2xl font-bold text-emerald-400 mb-2">
-                    {userData.totalEarnings.toLocaleString()} $INAI
+                    {loadingStats
+                      ? "Loading..."
+                      : userStats
+                      ? `${Number(
+                          userStats.totalEarnings
+                        ).toLocaleString()} $INAI`
+                      : "0 $INAI"}
                   </div>
                   <div className="text-slate-400">Total Earned</div>
                   <div className="text-xs text-emerald-300 mt-1">
@@ -1060,16 +1262,26 @@ export default function DashboardPage() {
                 </div>
                 <div className="p-6 bg-slate-800/30 border border-slate-700/50 rounded-xl">
                   <div className="text-2xl font-bold text-blue-400 mb-2">
-                    {userData.monthlyEarnings} $INAI
+                    {loadingEarnings
+                      ? "Loading..."
+                      : earningsSummary
+                      ? `${earningsSummary.monthly} $INAI`
+                      : "0 $INAI"}
                   </div>
                   <div className="text-slate-400">This Month</div>
                   <div className="text-xs text-blue-300 mt-1">
-                    From {userData.publishedDatasets} datasets
+                    From{" "}
+                    {loadingStats ? "..." : userStats?.publishedDatasets ?? 0}{" "}
+                    datasets
                   </div>
                 </div>
                 <div className="p-6 bg-slate-800/30 border border-slate-700/50 rounded-xl">
                   <div className="text-2xl font-bold text-purple-400 mb-2">
-                    {userData.weeklyEarnings} $INAI
+                    {loadingStats
+                      ? "Loading..."
+                      : userStats
+                      ? `${userStats.weeklyEarnings} $INAI`
+                      : "0 $INAI"}
                   </div>
                   <div className="text-slate-400">This Week</div>
                   <div className="text-xs text-purple-300 mt-1">
@@ -1093,7 +1305,7 @@ export default function DashboardPage() {
                   Earnings by Dataset
                 </h3>
                 <div className="space-y-4">
-                  {publishedDatasets
+                  {datasets
                     .filter((d) => d.earnings > 0)
                     .map((dataset) => (
                       <div

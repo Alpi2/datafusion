@@ -1,5 +1,8 @@
 "use client";
+import React from "react";
 import Link from "next/link";
+import { getAuthHeader, getAuthToken } from "@/lib/auth";
+import marketplaceAPI from "@/lib/api/marketplace";
 
 import {
   Star,
@@ -16,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 interface Dataset {
-  id: number;
+  id: string;
   title: string;
   description: string;
   creator: string;
@@ -32,16 +35,79 @@ interface Dataset {
     columns: number;
     size: string;
   };
+  isPurchased?: boolean;
 }
 
 interface DatasetCardProps {
   dataset: Dataset;
   viewMode: "grid" | "list";
+  isCompared?: boolean;
+  onCompareToggle?: () => void;
+  isWishlisted?: boolean;
+  onToggleWishlist?: () => void;
 }
 
-export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
+export function DatasetCard({
+  dataset,
+  viewMode,
+  isCompared,
+  onCompareToggle,
+  isWishlisted,
+  onToggleWishlist,
+}: DatasetCardProps) {
   const handleCardClick = () => {
     window.location.href = `/marketplace/${dataset.id}`;
+  };
+  const handlePurchase = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        alert(
+          "You must be signed in to purchase datasets. Redirecting to auth..."
+        );
+        window.location.href = "/auth";
+        return;
+      }
+
+      try {
+        const res = await marketplaceAPI.purchaseDataset(dataset.id);
+        // res may contain sessionId or unsignedTx depending on backend
+        alert("Purchase initiated. Proceed to payment.");
+        console.log("Purchase initiated:", res);
+      } catch (err: any) {
+        const message = err?.message || "Purchase failed";
+        alert(message);
+      }
+    } catch (error) {
+      console.error("Purchase failed:", error);
+      alert("Purchase failed. Please try again later.");
+    }
+  };
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        alert(
+          "You must be signed in to download datasets. Redirecting to auth..."
+        );
+        window.location.href = "/auth";
+        return;
+      }
+      try {
+        const body = await marketplaceAPI.downloadDataset(dataset.id);
+        const downloadUrl = (body as any)?.downloadUrl;
+        if (downloadUrl) window.open(downloadUrl, "_blank");
+        else alert("Download URL not available");
+      } catch (err: any) {
+        alert(err?.message || "Download failed");
+      }
+    } catch (error) {
+      console.error("Download failed:", error);
+      alert("Download failed. Please try again later.");
+    }
   };
   const formatNumber = (num: number) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
@@ -73,6 +139,7 @@ export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
                   {dataset.description}
                 </p>
               </div>
+
               <div className="flex items-center gap-2 ml-4">
                 <Badge
                   variant="secondary"
@@ -82,13 +149,35 @@ export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
                 >
                   {dataset.quality}% Quality
                 </Badge>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-slate-400 hover:text-pink-400"
-                >
-                  <Heart className="w-4 h-4" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCompareToggle && onCompareToggle();
+                    }}
+                    className={`p-1 rounded ${
+                      isCompared ? "bg-indigo-600 text-white" : "text-slate-400"
+                    }`}
+                    title={
+                      isCompared ? "Remove from compare" : "Add to compare"
+                    }
+                  >
+                    <Database className="w-4 h-4" />
+                  </button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`ml-2 ${
+                      isWishlisted ? "text-pink-400" : "text-slate-400"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onToggleWishlist) onToggleWishlist();
+                    }}
+                  >
+                    <Heart className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -127,6 +216,16 @@ export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
                 <Badge variant="outline" className="text-xs">
                   {dataset.category}
                 </Badge>
+                {dataset.isPurchased && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={(e) => handleDownload(e)}
+                    className="text-slate-400 hover:text-indigo-300 ml-2"
+                  >
+                    <Download className="w-4 h-4" />
+                  </Button>
+                )}
                 <div className="flex gap-1">
                   {dataset.tags.slice(0, 2).map((tag) => (
                     <Badge
@@ -151,7 +250,10 @@ export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
                 <span className="text-2xl font-bold text-white">
                   ${dataset.price}
                 </span>
-                <Button className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                <Button
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  onClick={(e) => handlePurchase(e)}
+                >
                   <ShoppingCart className="w-4 h-4 mr-2" />
                   Purchase
                 </Button>
@@ -179,13 +281,33 @@ export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
               {dataset.description}
             </p>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-slate-400 hover:text-pink-400 ml-2"
-          >
-            <Heart className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCompareToggle && onCompareToggle();
+              }}
+              className={`p-1 rounded ${
+                isCompared ? "bg-indigo-600 text-white" : "text-slate-400"
+              }`}
+              title={isCompared ? "Remove from compare" : "Add to compare"}
+            >
+              <Database className="w-4 h-4" />
+            </button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`text-slate-400 hover:text-pink-400 ml-2 ${
+                isWishlisted ? "text-pink-400" : ""
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onToggleWishlist) onToggleWishlist();
+              }}
+            >
+              <Heart className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 mb-4">
@@ -266,6 +388,7 @@ export function DatasetCard({ dataset, viewMode }: DatasetCardProps) {
             <Button
               size="sm"
               className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              onClick={(e) => handlePurchase(e)}
             >
               <ShoppingCart className="w-3 h-3 mr-1" />
               Buy

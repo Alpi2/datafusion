@@ -31,13 +31,18 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { chatWithDataset } from "@/lib/api/chat";
+import { blockchainAPI } from "@/lib/api/blockchain";
 
 interface DatasetPreviewProps {
   datasetName: string;
+  datasetId?: string;
   description: string;
   tier: string;
   isVisible: boolean;
   onClose: () => void;
+  resultUrl?: string;
+  previewData?: any[];
 }
 
 interface ChatMessage {
@@ -49,10 +54,12 @@ interface ChatMessage {
 
 export function DatasetPreview({
   datasetName,
+  datasetId,
   description,
   tier,
   isVisible,
   onClose,
+  previewData: previewDataProp,
 }: DatasetPreviewProps) {
   const [activeTab, setActiveTab] = useState<"preview" | "chat" | "publish">(
     "preview"
@@ -82,7 +89,7 @@ export function DatasetPreview({
   const [validationScore, setValidationScore] = useState(94);
 
   // Mock dataset preview data with some anomalies for demonstration
-  const previewData = [
+  const defaultPreviewData = [
     {
       id: 1,
       name: "John Smith",
@@ -130,6 +137,11 @@ export function DatasetPreview({
     },
   ];
 
+  const previewData =
+    previewDataProp && previewDataProp.length > 0
+      ? previewDataProp
+      : defaultPreviewData;
+
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
 
@@ -139,22 +151,41 @@ export function DatasetPreview({
       content: chatInput,
       timestamp: new Date(),
     };
-
     setChatMessages((prev) => [...prev, userMessage]);
     setChatInput("");
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiResponse: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: generateAIResponse(chatInput),
-        timestamp: new Date(),
-      };
-      setChatMessages((prev) => [...prev, aiResponse]);
-      setIsTyping(false);
-    }, 1500);
+    // Call backend RAG endpoint for dataset chat
+    (async () => {
+      try {
+        // Prepare conversation history in the expected shape
+        const history = chatMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+        const datasetIdToUse = datasetId || datasetName || ""; // prefer explicit id prop
+        const resp = await chatWithDataset(datasetIdToUse, chatInput, history);
+        const assistantText = resp?.response || resp?.message || "No response.";
+        const aiResponse: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: assistantText,
+          timestamp: new Date(),
+        };
+        setChatMessages((prev) => [...prev, aiResponse]);
+      } catch (e: any) {
+        const fallback: ChatMessage = {
+          id: (Date.now() + 2).toString(),
+          role: "assistant",
+          content:
+            "Sorry, I couldn't fetch an answer right now. Please try again later.",
+          timestamp: new Date(),
+        };
+        setChatMessages((prev) => [...prev, fallback]);
+      } finally {
+        setIsTyping(false);
+      }
+    })();
   };
 
   const generateAIResponse = (query: string) => {
@@ -385,22 +416,57 @@ all requirements for ${tier} tier deployment.
   };
 
   const handlePublish = async () => {
-    setIsPublishing(true);
-    setPublishStep("payment");
+    // Step flow: "setup" -> "payment" -> "deploying" -> "success"
+    if (publishStep === "setup") {
+      setPublishStep("payment");
+      return;
+    }
 
-    // Simulate payment processing
-    setTimeout(() => {
+    if (publishStep === "payment") {
       setPublishStep("deploying");
+      setIsPublishing(true);
+      try {
+        // Determine datasetId - fallback to datasetName when an id isn't available
+        // Prefer an explicit datasetId prop
+        const datasetIdToUse = datasetId || datasetName || "";
 
-      // Simulate deployment (public tokenization or private NFT minting)
-      setTimeout(
-        () => {
-          setPublishStep("success");
-          setIsPublishing(false);
-        },
-        deploymentType === "private" ? 2500 : 3000
-      ); // Slightly faster for NFT minting
-    }, 2000);
+        if (!datasetIdToUse) {
+          alert(
+            "Deployment failed: datasetId is missing. Ensure the dataset has been saved and try again."
+          );
+          setPublishStep("setup");
+          return;
+        }
+
+        // Deploy bonding curve via API
+        const result = await blockchainAPI.deployBondingCurve({
+          datasetId: datasetIdToUse,
+          tokenName: `${datasetName} Token`,
+          tokenSymbol: datasetName.substring(0, 4).toUpperCase(),
+        });
+
+        setPublishStep("success");
+
+        // Redirect to dashboard showing deployed contract
+        setTimeout(() => {
+          const contractAddress =
+            result?.bondingCurve?.contractAddress ||
+            result?.bondingCurve?.contract_address ||
+            result?.contractAddress;
+          if (contractAddress) {
+            window.location.href = `/dashboard?deployed=${contractAddress}`;
+          } else {
+            window.location.href = `/dashboard`;
+          }
+        }, 2000);
+      } catch (error) {
+        console.error("Deployment failed:", error);
+        alert("Deployment failed. Please try again.");
+        setPublishStep("setup");
+      } finally {
+        setIsPublishing(false);
+      }
+    }
   };
 
   const handleViewDashboard = () => {
@@ -548,16 +614,19 @@ all requirements for ${tier} tier deployment.
                             key={row.id}
                             className="border-b border-slate-700/30"
                           >
-                            {Object.values(row).map((value, index) => (
-                              <td
-                                key={index}
-                                className="p-4 text-sm text-slate-300"
-                              >
-                                {typeof value === "number" && index === 5
-                                  ? `$${value.toFixed(2)}`
-                                  : value}
-                              </td>
-                            ))}
+                            {Object.values(row).map((val, index) => {
+                              const value: any = val as any;
+                              return (
+                                <td
+                                  key={index}
+                                  className="p-4 text-sm text-slate-300"
+                                >
+                                  {typeof value === "number" && index === 5
+                                    ? `$${(value as number).toFixed(2)}`
+                                    : String(value)}
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
