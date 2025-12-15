@@ -58,3 +58,6 @@ bun.lock
 npm-debug.log
 yarn.lock
 yarn-error.log
+liste.md
+claude.md
+todo.md

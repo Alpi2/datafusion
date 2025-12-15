@@ -1,0 +1,42 @@
+%% Architecture diagram for DataFusion (Mermaid)
+
+```mermaid
+graph TD
+    A[Frontend UI] -->|Upload Docs| B[Embeddings Service]
+    A -->|Generate Dataset| C[Generation Worker]
+    A -->|Chat with Data| D[Chat Service]
+    
+    B -->|Extract Text| E[Document Processor]
+    B -->|Generate Embeddings| F[OpenAI Embeddings API]
+    B -->|Store Vectors| G[(PostgreSQL + pgvector)]
+    
+    C -->|Multi-AI| H[Ensemble Service]
+    H -->|GPT-4| I[OpenAI Service]
+    H -->|Claude| J[Claude Service]
+    H -->|Gemini| K[Gemini Service]
+    
+    C -->|Validate| L[Validation Service]
+    C -->|Compliance| M[Compliance Service]
+    
+    D -->|RAG| N[Embeddings Search]
+    D -->|AI Response| I
+    
+    G -->|Semantic Search| N
+    
+    C -->|Save| O[MinIO Storage]
+    C -->|Progress| P[Socket.io]
+    P -->|Real-time| A
+```
+
+## Güvenlik Notları
+
+- **API Keys:** Tüm AI provider API key'lerini `.env` dosyasında saklayın; asla versiyon kontrolüne (git) commit etmeyin.
+- **File Upload:** `multer` ile dosya boyutu limiti (ör. 10MB) ve MIME tipi kontrolü uygulandı.
+- **Rate Limiting:** `embeddings` ve `chat` uç noktaları için özel rate limit ekleyin (ör. API tier bazlı veya IP bazlı limitler).
+- **Input Sanitization:** Tüm endpoint girişlerini `zod` veya benzeri bir schema validator ile doğrulayın; maksimum uzunluk ve beklenen tipleri zorunlu kılın.
+- **Vector Injection:** `pgvector` sorgularında parametreleştirilmiş sorgular veya prepared statements kullanın; raw string interpolation yapmayın.
+- **Secrets in CI/CD:** CI pipeline'da gizli anahtarları `env`/secret store ile yönetin, repo içinde plaintext secret bırakmayın.
+
+---
+
+Dosyayı görüntülemek için mermaid desteği olan bir viewer kullanabilirsiniz (GitHub destekli markdown preview veya mermaid-live-editor).

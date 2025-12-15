@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant U as User (Frontend)
+    participant M as MetaMask
+    participant A as Auth API
+    participant R as Redis
+    participant B as Blockchain
+    participant DB as PostgreSQL
+
+    U->>A: POST /api/auth/wallet/connect<br/>{walletAddress}
+    A->>A: Generate nonce
+    A->>R: Store nonce (5 min TTL)
+    A->>U: Return {nonce, message}
+    
+    U->>M: Request signature
+    M->>M: User signs message
+    M->>U: Return signature
+    
+    U->>A: POST /api/auth/wallet/verify<br/>{walletAddress, signature, nonce}
+    A->>R: Get & delete nonce
+    A->>A: Verify signature
+    A->>DB: Find or create user
+    A->>B: Get $INFL balance
+    A->>DB: Update user balance
+    A->>A: Generate JWT token
+    A->>DB: Create session
+    A->>R: Cache session
+    A->>U: Return {token, user}
+    
+    U->>A: POST /api/auth/profile/create<br/>Authorization: Bearer token<br/>{username}
+    A->>A: Validate JWT
+    A->>R: Check session
+    A->>DB: Check username uniqueness
+    A->>DB: Update user profile
+    A->>U: Return {user}
+    
+    U->>U: Redirect to /dashboard
