@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Enable corepack and setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile --reporter=silent
+
+      - name: Run frontend tests (with coverage)
+        working-directory: frontend
+        run: pnpm test
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+
+      - name: Enforce frontend coverage thresholds
+        if: always()
+        working-directory: frontend
+        run: |
+          node -e "const fs=require('fs'); const p='coverage/coverage-summary.json'; if(!fs.existsSync(p)){console.error('coverage summary not found'); process.exit(1);} const s=JSON.parse(fs.readFileSync(p,'utf8')); const pct=s.total.statements.pct; console.log('Frontend statements %',pct); if(pct<75){console.error('Frontend coverage below threshold'); process.exit(2);}"
+
+      - name: Install backend deps
+        working-directory: backend
+        run: pnpm install --frozen-lockfile --reporter=silent
+
+      - name: Run backend tests (with coverage)
+        working-directory: backend
+        run: pnpm test --silent
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage
+
+      - name: Enforce backend coverage thresholds
+        if: always()
+        working-directory: backend
+        run: |
+          node -e "const fs=require('fs'); const p='coverage/coverage-summary.json'; if(!fs.existsSync(p)){console.error('coverage summary not found'); process.exit(1);} const s=JSON.parse(fs.readFileSync(p,'utf8')); const pct=s.total.statements.pct; console.log('Backend statements %',pct); if(pct<80){console.error('Backend coverage below threshold'); process.exit(2);}"
+
+      - name: Summary
+        run: echo "Frontend and Backend tests finished. Coverage artifacts uploaded."
