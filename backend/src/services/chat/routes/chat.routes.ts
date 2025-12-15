@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { ChatController } from "../controllers/chat.controller";
+import { authMiddleware } from "../../auth/middleware/auth.middleware";
+const router = Router();
+const controller = new ChatController();
+router.use(authMiddleware);
+router.post("/dataset/:id", controller.chatWithDataset);
+router.get("/dataset/:id/patterns", controller.detectPatterns);
+router.get("/dataset/:id/anomalies", controller.detectAnomalies);
+export default router;
