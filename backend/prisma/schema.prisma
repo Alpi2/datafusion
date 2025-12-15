@@ -8,59 +8,353 @@ datasource db {
 }
 
 model User {
-  id                String    @id @default(uuid())
-  walletAddress     String    @unique @map("wallet_address") @db.VarChar(42)
-  username          String    @unique @db.VarChar(50)
-  email             String?   @db.VarChar(255)
-  profileImageUrl   String?   @map("profile_image_url")
-  bio               String?
-  inflBalance       Decimal   @default(0) @map("infl_balance") @db.Decimal(38, 18)
-  reputationScore   Int       @default(0) @map("reputation_score")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-  
-  sessions          UserSession[]
-  
-  @@map("users")
+  id              String   @id @default(uuid())
+  walletAddress   String   @unique @map("wallet_address") @db.VarChar(42)
+  username        String   @unique @db.VarChar(50)
+  email           String?  @db.VarChar(255)
+  profileImageUrl String?  @map("profile_image_url")
+  bio             String?
+  inflBalance     Decimal  @default(0) @map("infl_balance") @db.Decimal(38, 18)
+  reputationScore Int      @default(0) @map("reputation_score")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  sessions UserSession[]
+  generationJobs GenerationJob[]
+  datasetSchemas DatasetSchema[]
+  datasets  Dataset[]
+  purchases Purchase[]
+  reviews   Review[]
+  userDatasets UserDataset[]
+  earnings     Earning[]
+  activityLogs ActivityLog[]
+  knowledgeDocuments KnowledgeDocument[]
+
   @@index([walletAddress])
   @@index([username])
+  @@map("users")
 }
 
 model UserSession {
-  id            String   @id @default(uuid())
-  userId        String   @map("user_id")
-  sessionToken  String   @unique @map("session_token")
-  expiresAt     DateTime @map("expires_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-  
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@map("user_sessions")
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  sessionToken String   @unique @map("session_token")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([sessionToken])
-}
-generator client {
-  provider = "prisma-client-js"
+  @@map("user_sessions")
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+model GenerationJob {
+  id                     String   @id @default(uuid())
+  userId                 String   @map("user_id")
+  tier                   String   @db.VarChar(20)
+  prompt                 String   @db.Text
+  schema                 Json?
+  aiModels               String[]
+  validationLevel        String?  @map("validation_level") @db.VarChar(20)
+  complianceRequirements String[] @map("compliance_requirements")
+  status                 String   @default("pending") @db.VarChar(20)
+  progress               Int      @default(0)
+  currentStep            String?  @map("current_step") @db.Text
+  resultUrl              String?  @map("result_url") @db.Text
+  qualityScore           Int?     @map("quality_score")
+  rowCount               Int?     @map("row_count")
+  fileSize               BigInt?  @map("file_size")
+  errorMessage           String?  @map("error_message") @db.Text
+  createdAt              DateTime @default(now()) @map("created_at")
+  completedAt            DateTime? @map("completed_at")
+
+  // References to knowledge documents and context/reports
+  knowledgeDocumentIds   String[] @map("knowledge_document_ids")
+  chatContext            Json?    @map("chat_context")
+  validationReport       Json?    @map("validation_report")
+  complianceReport       Json?    @map("compliance_report")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("generation_jobs")
 }
 
-model User {
-  id            String   @id @default(uuid())
-  email         String?  @unique
-  walletAddress String?  @unique
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  sessions      Session[]
+model DatasetSchema {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String   @db.VarChar(100)
+  description String?  @db.Text
+  fields      Json
+  tier        String?  @db.VarChar(20)
+  isTemplate  Boolean  @default(false) @map("is_template")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isTemplate])
+  @@map("dataset_schemas")
 }
 
-model Session {
+model Dataset {
+  id                 String    @id @default(uuid())
+  creatorId          String    @map("creator_id")
+  title              String    @db.VarChar(255)
+  description        String    @db.Text
+  category           String    @db.VarChar(100)
+  tags               String[]
+  price              Decimal   @db.Decimal(10, 2)
+  qualityScore       Int       @map("quality_score")
+  downloadCount      Int       @default(0) @map("download_count")
+  rating             Decimal   @default(0) @db.Decimal(3, 2)
+  reviewCount        Int       @default(0) @map("review_count")
+  previewData        Json      @map("preview_data")
+  fileUrl            String    @map("file_url") @db.Text
+  fileSize           BigInt    @map("file_size")
+  rowCount           Int       @map("row_count")
+  columnCount        Int       @map("column_count")
+  status             String    @default("active") @db.VarChar(20)
+  isNft              Boolean   @default(false) @map("is_nft")
+  nftContractAddress String?   @map("nft_contract_address") @db.VarChar(42)
+  nftTokenId         String?   @map("nft_token_id") @db.VarChar(78)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  creator   User       @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  purchases Purchase[]
+  reviews   Review[]
+  userDataset UserDataset?
+  earnings    Earning[]
+  bondingCurve BondingCurve?
+
+  @@index([creatorId])
+  @@index([category])
+  @@index([status])
+  @@index([createdAt])
+  @@index([rating])
+  @@index([downloadCount])
+  @@map("datasets")
+}
+
+model Purchase {
+  id              String   @id @default(uuid())
+  buyerId         String   @map("buyer_id")
+  datasetId       String   @map("dataset_id")
+  pricePaid       Decimal  @db.Decimal(10, 2) @map("price_paid")
+  paymentMethod   String   @db.VarChar(50)
+  stripePaymentId String?  @unique @map("stripe_payment_id")
+  transactionHash String?  @map("transaction_hash") @db.VarChar(66)
+  purchasedAt     DateTime @default(now()) @map("purchased_at")
+
+  buyer   User    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([buyerId, datasetId])
+  @@index([buyerId])
+  @@index([datasetId])
+  @@index([stripePaymentId])
+  @@map("purchases")
+}
+
+model Review {
   id        String   @id @default(uuid())
-  user      User     @relation(fields: [userId], references: [id])
-  userId    String
-  createdAt DateTime @default(now())
-  expiresAt DateTime?
+  userId    String   @map("user_id")
+  datasetId String   @map("dataset_id")
+  rating    Int      @db.SmallInt
+  comment   String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, datasetId])
+  @@index([datasetId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+model UserDataset {
+  id                  String    @id @default(uuid())
+  userId              String    @map("user_id")
+  datasetId           String    @unique @map("dataset_id")
+  status              String    @default("draft") @db.VarChar(20)
+  bondingProgress     Decimal   @default(0) @map("bonding_progress") @db.Decimal(5, 2)
+  marketCap           Decimal   @default(0) @map("market_cap") @db.Decimal(20, 2)
+  graduationThreshold Decimal   @default(69000) @map("graduation_threshold") @db.Decimal(20, 2)
+  totalEarnings       Decimal   @default(0) @map("total_earnings") @db.Decimal(20, 8)
+  tradingVolume       Decimal   @default(0) @map("trading_volume") @db.Decimal(20, 2)
+  holderCount         Int       @default(0) @map("holder_count")
+  deploymentType      String    @default("public") @db.VarChar(20)
+  nftTokenId          String?   @map("nft_token_id") @db.VarChar(78)
+  storageProvider     String?   @map("storage_provider") @db.VarChar(50)
+  licenseRevenue      Decimal   @default(0) @map("license_revenue") @db.Decimal(20, 8)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  publishedAt         DateTime? @map("published_at")
+  graduatedAt         DateTime? @map("graduated_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([datasetId])
+  @@index([status])
+  @@map("user_datasets")
+}
+
+model Earning {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  datasetId       String?  @map("dataset_id")
+  amount          Decimal  @db.Decimal(20, 8)
+  type            String   @db.VarChar(50)
+  source          String?  @db.VarChar(100)
+  transactionHash String?  @map("transaction_hash") @db.VarChar(66)
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dataset Dataset? @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([datasetId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("earnings")
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String   @db.VarChar(100)
+  details   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("activity_log")
+}
+
+model KnowledgeDocument {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  filename    String   @db.VarChar(255)
+  fileUrl     String   @map("file_url") @db.Text
+  fileType    String   @map("file_type") @db.VarChar(50)
+  fileSize    BigInt   @map("file_size")
+  contentText String?  @map("content_text") @db.Text
+  processed   Boolean  @default(false)
+  embeddings  Json?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([processed])
+  @@map("knowledge_documents")
+}
+
+model PlatformStats {
+  id                String   @id @default(uuid())
+  date              DateTime @unique @db.Date
+  totalUsers        Int      @default(0) @map("total_users")
+  totalDatasets     Int      @default(0) @map("total_datasets")
+  totalVolume       Decimal  @default(0) @map("total_volume") @db.Decimal(20, 2)
+  totalEarnings     Decimal  @default(0) @map("total_earnings") @db.Decimal(20, 8)
+  activeUsers24h    Int      @default(0) @map("active_users_24h")
+  newDatasets24h    Int      @default(0) @map("new_datasets_24h")
+  totalPurchases24h Int      @default(0) @map("total_purchases_24h")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([date])
+  @@map("platform_stats")
+}
+
+model BondingCurve {
+  id                  String    @id @default(uuid())
+  datasetId           String    @unique @map("dataset_id")
+  contractAddress     String    @unique @map("contract_address") @db.VarChar(42)
+  creatorAddress      String    @map("creator_address") @db.VarChar(42)
+  tokenName           String    @map("token_name") @db.VarChar(100)
+  tokenSymbol         String    @map("token_symbol") @db.VarChar(10)
+  currentSupply       Decimal   @default(0) @map("current_supply") @db.Decimal(20, 8)
+  currentPrice        Decimal   @default(0) @map("current_price") @db.Decimal(20, 8)
+  marketCap           Decimal   @default(0) @map("market_cap") @db.Decimal(20, 2)
+  totalVolume         Decimal   @default(0) @map("total_volume") @db.Decimal(20, 2)
+  holderCount         Int       @default(0) @map("holder_count")
+  graduated           Boolean   @default(false)
+  uniswapPoolAddress  String?   @map("uniswap_pool_address") @db.VarChar(42)
+  deploymentTxHash    String    @map("deployment_tx_hash") @db.VarChar(66)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  graduatedAt         DateTime? @map("graduated_at")
+
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  trades  Trade[]
+
+  @@index([contractAddress])
+  @@index([creatorAddress])
+  @@index([graduated])
+  @@map("bonding_curves")
+}
+
+model Trade {
+  id              String   @id @default(uuid())
+  bondingCurveId  String   @map("bonding_curve_id")
+  traderAddress   String   @map("trader_address") @db.VarChar(42)
+  type            String   @db.VarChar(10)
+  amount          Decimal  @db.Decimal(20, 8)
+  price           Decimal  @db.Decimal(20, 8)
+  totalValue      Decimal  @map("total_value") @db.Decimal(20, 2)
+  fee             Decimal  @db.Decimal(20, 8)
+  transactionHash String   @unique @map("transaction_hash") @db.VarChar(66)
+  blockNumber     BigInt   @map("block_number")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  bondingCurve BondingCurve @relation(fields: [bondingCurveId], references: [id], onDelete: Cascade)
+
+  @@index([bondingCurveId])
+  @@index([traderAddress])
+  @@index([type])
+  @@index([createdAt])
+  @@map("trades")
+}
+
+model Wishlist {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  datasetId String   @map("dataset_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dataset Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, datasetId])
+  @@index([userId])
+  @@index([datasetId])
+  @@map("wishlists")
+}
+
+model UserWallet {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  address   String   @map("address") @db.VarChar(42)
+  provider  String?  @map("provider") @db.VarChar(50)
+  isActive  Boolean  @default(false) @map("is_active")
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, address])
+  @@index([userId])
+  @@index([address])
+  @@map("user_wallets")
 }
