@@ -1,7 +1,5 @@
-import { Request, Response, NextFunction } from 'express';
+export { validateRequest } from "../../../shared/middleware/validation.middleware";
 
-export const validate = (schema: any) => (req: Request, res: Response, next: NextFunction) => {
-  // placeholder for request validation
-  // e.g. schema.validate(req.body)
-  return next();
-};
+// NOTE: This file re-exports the centralized validation middleware so existing
+// imports under services/auth continue to work while sharing a single
+// implementation across the codebase.
